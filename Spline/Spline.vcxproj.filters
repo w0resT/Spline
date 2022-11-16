@@ -80,5 +80,8 @@
     <ClInclude Include="types\vec2.h">
       <Filter>Файлы заголовков\types</Filter>
     </ClInclude>
+    <ClInclude Include="spline.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

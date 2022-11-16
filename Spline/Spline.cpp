@@ -13,10 +13,23 @@
 
 #include "types/vec2.h"
 
+// Matrix etc
+#include <Eigen/Dense>
+
+// Spline
+#include "spline.h"
+
 namespace globals {
     std::vector<vec2> g_points;
 
     bool is_splined = false;
+}
+
+namespace vars {
+    bool v_local_param = true; // Использовать ли локальную параметризацию 
+    int v_param = 0;            // 0 - Хордовая, 1 - Нормализованная,
+    int v_line_type = 0;        // 0 - Циклическая, 1 - ациклическая
+    float v_step = 0.1f;
 }
 
 // Data
@@ -56,6 +69,10 @@ static void ShowMainWindow( bool *p_open ) {
         return;
     }
 
+    static spline spl;
+
+    static bool testing_spline = false;
+
     if ( ImGui::BeginTable( "##main_page.table", 2, ImGuiTableFlags_NoSavedSettings ) ) {
         // First column
         ImGui::TableNextColumn( );
@@ -67,19 +84,85 @@ static void ShowMainWindow( bool *p_open ) {
 
                 if ( ImGui::Button( "Clear canvas", ImVec2( bt_sz_x, bt_sz_y ) ) ) {
                     globals::g_points.clear( );
+                    spl.clear( );
                     globals::is_splined = false;
                 }
 
+                ImGui::SameLine( );
+
+                if ( ImGui::Button( "Clear spline", ImVec2( bt_sz_x, bt_sz_y ) ) ) {
+                    // splines.clear()
+                    globals::is_splined = false;
+
+                    spl.clear( );
+                }
+
+                ImGui::Separator( );
+
+                //ImGui::Checkbox( "Use tested spline", &testing_spline );
+
+                //if ( ImGui::SliderFloat( "Step", &vars::v_step, 0.1f, 10.f ) ) {
+                //    spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                //}
+
                 if ( ImGui::Button( "Do spline", ImVec2( bt_sz_x, bt_sz_y ) ) ) {
                     globals::is_splined = true;
+
+                    //std::vector<vec2> test_vec {
+                    //    {0.f, 4.f },
+                    //    {1.f, 0.f },
+                    //    {-1.f, 0.f },
+                    //    {0.f, 4.f }
+                    //};
+
+                    std::vector<vec2> test_vec {
+                        {350.f, 170.f },
+                        {450.f, 300.f },
+                        {250.f, 300.f },
+                        {350.f, 170.f }
+                    };
+
+
+
+                    // Update spline
+                    if ( testing_spline ) {
+                        globals::g_points = test_vec;
+                        //spl.update( test_vec, 1, 1, true );
+                    }
+                    //else {
+                        spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                    //}
                 }
+
+                if ( ImGui::Combo( "Line Type", &vars::v_line_type, "Cyclic\0Acyclic\0\0" ) ) {
+                    // Update Spline
+                    if ( globals::is_splined ) {
+                        spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                    }
+                }
+
+                if ( ImGui::Combo( "Parameterization", &vars::v_param, "Chordate\0Normalized\0\0" ) ) {
+                    // Update Spline
+                    if ( globals::is_splined ) {
+                        spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                    }
+                }
+
+                //if ( ImGui::Checkbox("Local parameterization", &vars::v_local_param ) ) {
+                //    // Update spline
+                //    if ( globals::is_splined ) {
+                //        spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                //    }
+                //}
 
                 ImGui::EndChild( );
             }
 
             if ( ImGui::BeginChild( "##main_page.child.left.down", ImVec2( 0, 0 ), true, ImGuiWindowFlags_NoSavedSettings ) ) {
+                ImGui::Text( "Mouse Left: click to add point" );
+
                 const ImU32 main_line_color_u32 = ImColor( 255, 255, 102, 255 );
-                const ImU32 new_line_color_u32 = ImColor( 255, 179, 102, 255 );
+                const ImU32 new_line_color_u32 = ImColor( 255, 0, 0, 255 );
 
                 // Using InvisibleButton() as a convenience 1) it will advance the layout cursor and 2) allows us to use IsItemHovered()/IsItemActive()
                 ImVec2 canvas_p0 = ImGui::GetCursorScreenPos( );      // ImDrawList API uses screen coordinates!
@@ -123,8 +206,13 @@ static void ShowMainWindow( bool *p_open ) {
                 // Updating pos for moving point
                 if ( moving_point_idx != -1 ) {
                     globals::g_points[ moving_point_idx ] = mouse_pos_in_canvas;
-                    if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) )
+                    // Updating spline
+                    if ( globals::is_splined ) {
+                        spl.update( globals::g_points, vars::v_line_type, vars::v_param, vars::v_local_param, vars::v_step );
+                    }
+                    if ( !ImGui::IsMouseDown( ImGuiMouseButton_Left ) ) {
                         moving_point_idx = -1;
+                    }
                 }
 
                 // Draw grid + all lines in the canvas
@@ -149,6 +237,17 @@ static void ShowMainWindow( bool *p_open ) {
                     draw_list->AddCircle( ImVec2( origin.x + globals::g_points[ n ].x, origin.y + globals::g_points[ n ].y ), 3.f, IM_COL32( 59, 184, 42, 255 ), 0, 3.f );
                 }
 
+                // Drawing splines
+                auto spls = spl.get_splines( );
+                //for ( size_t n = 0; n < spls.size( ); ++n ) {
+                //    draw_list->AddCircle( ImVec2( origin.x + spls[ n ].x, origin.y + spls[ n ].y ), 3.f, new_line_color_u32, 0, 1.f );
+                //}
+                if ( spls.size() > 1 ) {
+                    for ( size_t n = 0; n < spls.size( ) - 1; ++n )
+                        draw_list->AddLine( ImVec2( origin.x + spls[ n ].x, origin.y + spls[ n ].y ),
+                                            ImVec2( origin.x + spls[ n + 1 ].x, origin.y + spls[ n + 1 ].y ), new_line_color_u32, 2.0f );
+                }
+
                 draw_list->PopClipRect( );
 
                 ImGui::EndChild( );
@@ -160,7 +259,27 @@ static void ShowMainWindow( bool *p_open ) {
         {
             ImGui::Text( "Information" );
             if ( ImGui::BeginChild( "##main_page.child.right", ImVec2( work_size.x / 2 - 12, 0 ), true, ImGuiWindowFlags_NoSavedSettings ) ) {
+                auto line_size = globals::g_points.size( );
+                if ( line_size > 0 ) { line_size -= 1; }
 
+                // Main lines coords
+                ImGui::Text( "Main lines coordinates: a(x,y) b(x,y)" );
+                ImGui::Separator( );
+                ImGui::Text( "Count of the lines: %d", line_size );
+                if ( ImGui::BeginListBox( "##MainLinesCoords" ) ) {
+                    for ( size_t i = 0; i < line_size; ++i ) {
+                        // Point a
+                        ImGui::Text( "(%.f, %.f)", globals::g_points[ i ].x, globals::g_points[ i ].y );
+
+                        // Point b
+                        /*if ( globals::g_points.size( ) > i + 1 )*/ {
+                            ImGui::SameLine( );
+                            ImGui::Text( "(%.f, %.f)", globals::g_points[ i + 1 ].x, globals::g_points[ i + 1 ].y );
+                        }
+                    }
+
+                    ImGui::EndListBox( );
+                }
 
                 ImGui::EndChild( );
             }
